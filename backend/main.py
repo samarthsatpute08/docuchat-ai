@@ -89,26 +89,21 @@ async def upload_pdf(
     file: UploadFile = File(...),
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
-    # Check token
     email = await redis_client.get(f"token:{credentials.credentials}")
     if not email:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-    # Check it's a PDF
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files allowed")
 
-    # Save PDF to disk
     doc_id = str(uuid.uuid4())
     file_path = f"{UPLOAD_DIR}/{doc_id}.pdf"
-    
+
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    # Process PDF into ChromaDB
     chunk_count = ingest_pdf(file_path, doc_id)
 
-    # Save document info to MongoDB
     await users_collection.database["documents"].insert_one({
         "doc_id": doc_id,
         "filename": file.filename,
@@ -129,15 +124,25 @@ async def chat(
     req: ChatRequest,
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
-    # Check token
     email = await redis_client.get(f"token:{credentials.credentials}")
     if not email:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-    # Get answer from RAG pipeline
+    # Rate limiting - max 10 requests per minute per user
+    rate_key = f"ratelimit:{email}"
+    count = await redis_client.incr(rate_key)
+    if count == 1:
+        await redis_client.expire(rate_key, 60)
+    if count > 10:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests. Max 10 questions per minute."
+        )
+
+    # Get answer from RAG
     answer = query_pdf(req.doc_id, req.question)
 
-    # Save chat to MongoDB
+    # Save to MongoDB
     await users_collection.database["chats"].insert_one({
         "doc_id": req.doc_id,
         "email": email,
@@ -145,10 +150,35 @@ async def chat(
         "answer": answer
     })
 
+    # Cache last 5 messages in Redis for this doc
+    cache_key = f"history:{email}:{req.doc_id}"
+    message = f"Q: {req.question}|||A: {answer}"
+    await redis_client.lpush(cache_key, message)
+    await redis_client.ltrim(cache_key, 0, 4)
+    await redis_client.expire(cache_key, 3600)
+
     return {
         "question": req.question,
         "answer": answer
     }
+
+
+@app.get("/history/{doc_id}")
+async def get_history(
+    doc_id: str,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    email = await redis_client.get(f"token:{credentials.credentials}")
+    if not email:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    # Get full history from MongoDB
+    chats = await users_collection.database["chats"].find(
+        {"doc_id": doc_id, "email": email},
+        {"_id": 0}
+    ).to_list(50)
+
+    return {"history": chats}
 
 
 @app.get("/documents")

@@ -9,12 +9,32 @@ export default function Chat() {
   const [messages, setMessages] = useState([])
   const [question, setQuestion] = useState('')
   const [loading, setLoading] = useState(false)
+  const [loadingHistory, setLoadingHistory] = useState(true)
   const bottomRef = useRef(null)
   const navigate = useNavigate()
 
   useEffect(() => {
+    loadHistory()
+  }, [])
+
+  useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  const loadHistory = async () => {
+    try {
+      const res = await api.get(`/history/${docId}`)
+      const historyMessages = []
+      res.data.history.forEach(item => {
+        historyMessages.push({ role: 'user', text: item.question })
+        historyMessages.push({ role: 'ai', text: item.answer })
+      })
+      setMessages(historyMessages)
+    } catch (err) {
+      console.error(err)
+    }
+    setLoadingHistory(false)
+  }
 
   const sendMessage = async (e) => {
     e.preventDefault()
@@ -32,14 +52,31 @@ export default function Chat() {
       })
       setMessages(prev => [...prev, { role: 'ai', text: res.data.answer }])
     } catch (err) {
-      setMessages(prev => [...prev, { role: 'ai', text: 'Something went wrong. Please try again.' }])
+      if (err.response?.status === 429) {
+        setMessages(prev => [...prev, {
+          role: 'ai',
+          text: 'Too many questions! Please wait a minute before asking again.'
+        }])
+      } else {
+        setMessages(prev => [...prev, {
+          role: 'ai',
+          text: 'Something went wrong. Please try again.'
+        }])
+      }
     }
     setLoading(false)
   }
 
+  if (loadingHistory) {
+    return (
+      <div style={styles.loading}>
+        <p>Loading conversation history...</p>
+      </div>
+    )
+  }
+
   return (
     <div style={styles.page}>
-      {/* Header */}
       <div style={styles.header}>
         <button onClick={() => navigate('/dashboard')} style={styles.backBtn}>
           ← Back
@@ -48,17 +85,20 @@ export default function Chat() {
         <div style={styles.badge}>AI Ready</div>
       </div>
 
-      {/* Messages */}
       <div style={styles.messages}>
         {messages.length === 0 && (
           <div style={styles.welcome}>
             <div style={styles.welcomeIcon}>💬</div>
             <h2 style={styles.welcomeTitle}>Ask anything about this document</h2>
             <p style={styles.welcomeText}>
-              Try: "Summarize this document" or "What are the key points?"
+              Try one of these to get started:
             </p>
             <div style={styles.suggestions}>
-              {['Summarize this document', 'What are the main topics?', 'What is the conclusion?'].map(s => (
+              {[
+                'Summarize this document',
+                'What are the main topics?',
+                'What is the conclusion?'
+              ].map(s => (
                 <button
                   key={s}
                   style={styles.suggestion}
@@ -91,7 +131,6 @@ export default function Chat() {
         <div ref={bottomRef} />
       </div>
 
-      {/* Input */}
       <form onSubmit={sendMessage} style={styles.inputArea}>
         <input
           style={styles.input}
@@ -114,6 +153,13 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     background: '#f5f5f0',
+  },
+  loading: {
+    height: '100vh',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: '#666',
   },
   header: {
     background: 'white',
@@ -164,7 +210,12 @@ const styles = {
   welcomeIcon: { fontSize: '48px', marginBottom: '16px' },
   welcomeTitle: { fontSize: '22px', fontWeight: '700', marginBottom: '8px' },
   welcomeText: { color: '#666', marginBottom: '24px' },
-  suggestions: { display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' },
+  suggestions: {
+    display: 'flex',
+    gap: '10px',
+    justifyContent: 'center',
+    flexWrap: 'wrap'
+  },
   suggestion: {
     padding: '10px 18px',
     background: 'white',
@@ -199,7 +250,11 @@ const styles = {
     display: 'block',
     marginBottom: '6px',
   },
-  msgText: { fontSize: '15px', lineHeight: '1.6', whiteSpace: 'pre-wrap' },
+  msgText: {
+    fontSize: '15px',
+    lineHeight: '1.6',
+    whiteSpace: 'pre-wrap'
+  },
   typing: { color: '#888', fontStyle: 'italic' },
   inputArea: {
     padding: '16px 24px',
