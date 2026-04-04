@@ -21,14 +21,16 @@ def query_pdf(doc_id: str, question: str, chat_history: list = []) -> str:
         persist_directory=CHROMA_DIR
     )
     
-    relevant_chunks = vectorstore.similarity_search(question, k=3)
+    relevant_chunks = vectorstore.similarity_search(question, k=6)
     context = "\n\n".join([chunk.page_content for chunk in relevant_chunks])
 
     # Step 3: Build prompt with context
-    prompt = f"""You are a helpful assistant. Answer the question based ONLY on the context below.
-If the answer is not in the context, say "I couldn't find that in the document."
+    prompt = f"""You are a helpful assistant analyzing a document. 
+Answer the question based on the context below.
+If the exact answer isn't in the context but related information is there, use that to give the best possible answer.
+Only say "I couldn't find that in the document" if the topic is completely absent.
 
-Context from document:
+Context:
 {context}
 
 Question: {question}
