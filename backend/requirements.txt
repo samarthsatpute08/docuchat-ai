@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+python-jose
+motor
+pymongo
+redis
+langchain
+langchain-community
+langchain-groq
+groq
+chromadb
+sentence-transformers
+pypdf
+python-dotenv
+python-multipart
